@@ -19,9 +19,17 @@ jobs:
         toolchain: stable
         override: true
 
-    - name: Setup GTK dependencies
-      run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libglib2.0-dev
-
+    - name: Install GTK4 + Libadwaita dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            libgtk-4-dev \
+            libadwaita-1-dev \
+            libglib2.0-dev \
+            libcairo2-dev \
+            libpango1.0-dev \
+            libgdk-pixbuf-2.0-dev
+            
     - name: Build engine
       run: cargo build -p pkgforecaster-engine --release
 
