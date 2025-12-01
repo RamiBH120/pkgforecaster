@@ -57,5 +57,5 @@ pub fn parse_apt_simulation(output: &str) -> Simulation {
     let high_risk = updates.iter().filter(|u| u.risk_score.unwrap_or(0.0) >= 0.75).count() as u32;
     let medium_risk = updates.iter().filter(|u| (u.risk_score.unwrap_or(0.0) >= 0.4) && (u.risk_score.unwrap_or(0.0) < 0.75)).count() as u32;
 
-    Simulation { updates, summary: Summary { total, highRisk: high_risk, mediumRisk: medium_risk } }
+    Simulation { updates, summary: Summary { total, high_risk: high_risk, medium_risk: medium_risk } }
 }

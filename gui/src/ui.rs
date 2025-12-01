@@ -30,8 +30,8 @@ pub struct Simulation {
 #[derive(Debug, Deserialize, Clone)]
 pub struct Summary {
     pub total: u32,
-    pub highRisk: u32,
-    pub mediumRisk: u32,
+    pub high_risk: u32,
+    pub medium_risk: u32,
 }
 
 pub fn run() -> anyhow::Result<()> {

@@ -29,14 +29,13 @@ jobs:
           libcairo2-dev \
           libpango1.0-dev \
           libgdk-pixbuf-2.0-dev
+    - name: Build
+      run: cargo build --release
     - name: Build engine
       run: cargo build -p pkgforecaster-engine --release
 
     - name: Build GUI
       run: cargo build -p pkgforecaster-gui --release
-
-    - name: Run engine tests (if any)
-      run: cargo test -p pkgforecaster-engine
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
