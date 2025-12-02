@@ -1,9 +1,9 @@
 use gtk4::prelude::*;
 use gtk4::{
     ApplicationWindow, Box as GtkBox, Button, Label, ListBox, Orientation, Paned, ScrolledWindow,
-    TextView, DrawingArea, cairo,
+    TextView, DrawingArea, cairo, WrapMode,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::process::Command;
 use glib::MainContext;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct PackageUpdate {
     pub name: String,
     pub current: String,
@@ -21,13 +21,13 @@ pub struct PackageUpdate {
     pub risk_score: Option<f64>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Simulation {
     pub updates: Vec<PackageUpdate>,
     pub summary: Summary,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Summary {
     pub total: u32,
     pub high_risk: u32,
@@ -104,7 +104,7 @@ pub fn run() -> anyhow::Result<()> {
         let diff_label = Label::new(Some("Diff Viewer"));
         right_vbox.append(&diff_label);
         let diff_view = TextView::new();
-        diff_view.set_wrap_mode(gtk4::pango::WrapMode::Word);
+        diff_view.set_wrap_mode(WrapMode::Word);
         diff_view.set_vexpand(true);
         right_vbox.append(&diff_view);
 
@@ -227,52 +227,48 @@ pub fn run() -> anyhow::Result<()> {
             let heatmap_area = heatmap_area_clone.clone();
             let sim_state = sim_state_for_thread.clone();
             
-            // Use spawn_local instead of spawn with MainContext
-            MainContext::default().spawn_local(async move {
-                // Run the blocking operation in a separate thread
-                let result = glib::spawn_future_local(async move {
-                    tokio::task::spawn_blocking(|| {
-                        // Try to call engine CLI; if fails, fallback to bundled dummy file
-                        let output = Command::new("../engine/target/release/engine-cli")
-                            .arg("--apt-sim")
-                            .output();
+            // Spawn blocking work in a separate thread, then update UI on main thread
+            std::thread::spawn(move || {
+                // Try to call engine CLI; if fails, fallback to bundled dummy file
+                let output = Command::new("../engine/target/release/engine-cli")
+                    .arg("--apt-sim")
+                    .output();
 
-                        let stdout = match output {
-                            Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
-                            _ => {
-                                // fallback: read data/dummy_simulation.json plain (JSON already shaped)
-                                std::fs::read_to_string("data/dummy_simulation.json").unwrap_or_default()
-                            }
-                        };
+                let stdout = match output {
+                    Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
+                    _ => {
+                        // fallback: read data/dummy_simulation.json plain (JSON already shaped)
+                        std::fs::read_to_string("data/dummy_simulation.json").unwrap_or_default()
+                    }
+                };
 
-                        // parse JSON into Simulation
-                        let parsed: Result<Simulation, _> = serde_json::from_str(&stdout);
-                        if let Ok(mut sim) = parsed {
+                // parse JSON into Simulation
+                let parsed: Result<Simulation, _> = serde_json::from_str(&stdout);
+                
+                // Schedule UI update on main thread using glib::idle_add_local
+                glib::idle_add_local(move || {
+                    match parsed {
+                        Ok(mut sim) => {
                             // ensure risk scores exist
                             for (i, p) in sim.updates.iter_mut().enumerate() {
                                 if p.risk_score.is_none() {
                                     p.risk_score = Some(((i as f64) % 10.0) / 10.0);
                                 }
                             }
-                            Ok(sim)
-                        } else {
-                            Err(stdout)
+                            // store into sim_state and queue redraw
+                            *sim_state.lock().unwrap() = Some(sim.clone());
+                            diff_view.buffer().set_text(&serde_json::to_string_pretty(&sim).unwrap());
+                            heatmap_area.queue_draw();
                         }
-                    }).await
-                }).await;
-
-                match result {
-                    Ok(Ok(sim)) => {
-                        // store into sim_state and queue redraw
-                        *sim_state.lock().unwrap() = Some(sim.clone());
-                        diff_view.buffer().set_text(&serde_json::to_string_pretty(&sim).unwrap());
-                        heatmap_area.queue_draw();
+                        Err(_) => {
+                            // parse failed, write raw stdout to diff_view
+                            diff_view.buffer().set_text(&stdout);
+                        }
                     }
-                    Ok(Err(stdout)) | Err(stdout) => {
-                        // parse failed, write raw stdout to diff_view
-                        diff_view.buffer().set_text(&stdout);
-                    }
-                }
+                    
+                    // Return ControlFlow::Break to run only once
+                    glib::ControlFlow::Break
+                });
             });
         });
 
