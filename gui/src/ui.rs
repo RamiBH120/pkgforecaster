@@ -1,7 +1,7 @@
 use gtk4::prelude::*;
 use gtk4::{
     ApplicationWindow, Box as GtkBox, Button, Label, ListBox, Orientation, Paned, ScrolledWindow,
-    TextView, DrawingArea, gdk, cairo,
+    TextView, DrawingArea, cairo,
 };
 use serde::Deserialize;
 use std::fs::File;
@@ -49,7 +49,11 @@ pub fn run() -> anyhow::Result<()> {
 
         // Sidebar
         let sidebar_box = GtkBox::new(Orientation::Vertical, 8);
-        sidebar_box.set_margin_all(12);
+        sidebar_box.set_margin_start(12);
+        sidebar_box.set_margin_end(12);
+        sidebar_box.set_margin_top(12);
+        sidebar_box.set_margin_bottom(12);
+        
         let header = Label::new(Some("PkgForecaster"));
         header.set_halign(gtk4::Align::Start);
         sidebar_box.append(&header);
@@ -61,11 +65,17 @@ pub fn run() -> anyhow::Result<()> {
         listbox.append(&Label::new(Some("simulation-dummy")));
         let sidebar_scroll = ScrolledWindow::new();
         sidebar_scroll.set_child(Some(&sidebar_box));
-        hpaned.add1(&sidebar_scroll);
+        
+        // Use set_start_child instead of add1
+        hpaned.set_start_child(Some(&sidebar_scroll));
 
         // Main content
         let main_vbox = GtkBox::new(Orientation::Vertical, 6);
-        main_vbox.set_margin_all(8);
+        main_vbox.set_margin_start(8);
+        main_vbox.set_margin_end(8);
+        main_vbox.set_margin_top(8);
+        main_vbox.set_margin_bottom(8);
+        
         let tab_bar = GtkBox::new(Orientation::Horizontal, 6);
         let _overview_btn = Button::with_label("Overview");
         let _details_btn = Button::with_label("Details");
@@ -75,14 +85,22 @@ pub fn run() -> anyhow::Result<()> {
 
         let content_paned = Paned::new(Orientation::Horizontal);
         let left_box = GtkBox::new(Orientation::Vertical, 6);
-        left_box.set_margin_all(6);
+        left_box.set_margin_start(6);
+        left_box.set_margin_end(6);
+        left_box.set_margin_top(6);
+        left_box.set_margin_bottom(6);
+        
         left_box.append(&Label::new(Some("Packages to update")));
         let pkg_list = ListBox::new();
         pkg_list.set_vexpand(true);
         left_box.append(&pkg_list);
 
         let right_vbox = GtkBox::new(Orientation::Vertical, 6);
-        right_vbox.set_margin_all(6);
+        right_vbox.set_margin_start(6);
+        right_vbox.set_margin_end(6);
+        right_vbox.set_margin_top(6);
+        right_vbox.set_margin_bottom(6);
+        
         let diff_label = Label::new(Some("Diff Viewer"));
         right_vbox.append(&diff_label);
         let diff_view = TextView::new();
@@ -102,13 +120,13 @@ pub fn run() -> anyhow::Result<()> {
         let sim_state_clone = sim_state.clone();
 
         // painting closure: draw heatmap grid based on simulation state
-        heatmap_area.set_draw_func(move |area, ctx, width, height| {
+        heatmap_area.set_draw_func(move |_area, ctx, width, height| {
             let guard = sim_state_clone.lock().unwrap();
             let sim = guard.clone();
 
             // clear background
             ctx.set_source_rgb(1.0, 1.0, 1.0);
-            ctx.paint().unwrap();
+            let _ = ctx.paint();
 
             // if no sim data, show placeholder text
             if sim.is_none() {
@@ -116,7 +134,7 @@ pub fn run() -> anyhow::Result<()> {
                 ctx.select_font_face("Sans", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
                 ctx.set_font_size(14.0);
                 ctx.move_to(20.0, (height / 2) as f64);
-                ctx.show_text("Risk Heatmap: run simulation to populate").unwrap();
+                let _ = ctx.show_text("Risk Heatmap: run simulation to populate");
                 return;
             }
 
@@ -160,28 +178,32 @@ pub fn run() -> anyhow::Result<()> {
                 };
                 ctx.set_source_rgb(rcol, gcol, bcol);
                 ctx.rectangle(x, y, cell_w - 4.0, cell_h - 4.0);
-                ctx.fill().unwrap();
+                let _ = ctx.fill();
 
                 // draw label
                 ctx.set_source_rgb(0.0, 0.0, 0.0);
                 ctx.set_font_size(10.0);
                 let label = format!("{} ({:.2})", p.name, score);
                 ctx.move_to(x + 6.0, y + 14.0);
-                ctx.show_text(&label).unwrap();
+                let _ = ctx.show_text(&label);
             }
         });
 
         right_vbox.append(&heatmap_area);
-        content_paned.add1(&left_box);
-        content_paned.add2(&right_vbox);
+        
+        // Use set_start_child and set_end_child instead of add1/add2
+        content_paned.set_start_child(Some(&left_box));
+        content_paned.set_end_child(Some(&right_vbox));
         main_vbox.append(&content_paned);
-        hpaned.add2(&main_vbox);
+        
+        // Use set_end_child instead of add2
+        hpaned.set_end_child(Some(&main_vbox));
 
         // initial dummy load
         if let Ok(sim) = load_dummy_simulation("data/dummy_simulation.json") {
             // ensure risk_score exists; fill stub scores if missing
             let mut sim = sim;
-            for (i, mut p) in sim.updates.iter_mut().enumerate() {
+            for (i, p) in sim.updates.iter_mut().enumerate() {
                 if p.risk_score.is_none() {
                     p.risk_score = Some(((i as f64) % 10.0) / 10.0); // sample spread
                 }
@@ -197,52 +219,65 @@ pub fn run() -> anyhow::Result<()> {
 
         // wire scan button to run engine asynchronously and update UI
         let diff_view_clone = diff_view.clone();
+        let heatmap_area_clone = heatmap_area.clone();
         let sim_state_for_thread = sim_state.clone();
+        
         scan_button.connect_clicked(move |_| {
-            // Run engine CLI asynchronously on a thread, then schedule update on main loop
-            std::thread::spawn(move || {
-                // Try to call engine CLI; if fails, fallback to bundled dummy file
-                let output = Command::new("../engine/target/release/engine-cli")
-                    .arg("--apt-sim")
-                    .output();
+            let diff_view = diff_view_clone.clone();
+            let heatmap_area = heatmap_area_clone.clone();
+            let sim_state = sim_state_for_thread.clone();
+            
+            // Use spawn_local instead of spawn with MainContext
+            MainContext::default().spawn_local(async move {
+                // Run the blocking operation in a separate thread
+                let result = glib::spawn_future_local(async move {
+                    tokio::task::spawn_blocking(|| {
+                        // Try to call engine CLI; if fails, fallback to bundled dummy file
+                        let output = Command::new("../engine/target/release/engine-cli")
+                            .arg("--apt-sim")
+                            .output();
 
-                let stdout = match output {
-                    Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
-                    _ => {
-                        // fallback: read data/dummy_simulation.json plain (JSON already shaped)
-                        std::fs::read_to_string("data/dummy_simulation.json").unwrap_or_default()
-                    }
-                };
+                        let stdout = match output {
+                            Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
+                            _ => {
+                                // fallback: read data/dummy_simulation.json plain (JSON already shaped)
+                                std::fs::read_to_string("data/dummy_simulation.json").unwrap_or_default()
+                            }
+                        };
 
-                // parse JSON into Simulation
-                let parsed: Result<Simulation, _> = serde_json::from_str(&stdout);
-                if let Ok(mut sim) = parsed {
-                    // ensure risk scores exist
-                    for (i, mut p) in sim.updates.iter_mut().enumerate() {
-                        if p.risk_score.is_none() {
-                            p.risk_score = Some(((i as f64) % 10.0) / 10.0);
+                        // parse JSON into Simulation
+                        let parsed: Result<Simulation, _> = serde_json::from_str(&stdout);
+                        if let Ok(mut sim) = parsed {
+                            // ensure risk scores exist
+                            for (i, p) in sim.updates.iter_mut().enumerate() {
+                                if p.risk_score.is_none() {
+                                    p.risk_score = Some(((i as f64) % 10.0) / 10.0);
+                                }
+                            }
+                            Ok(sim)
+                        } else {
+                            Err(stdout)
                         }
-                    }
-                    // schedule UI update on main thread
-                    let ctx = MainContext::default();
-                    ctx.spawn_local(async move {
+                    }).await
+                }).await;
+
+                match result {
+                    Ok(Ok(sim)) => {
                         // store into sim_state and queue redraw
-                        *sim_state_for_thread.lock().unwrap() = Some(sim.clone());
-                        diff_view_clone.buffer().set_text(&serde_json::to_string_pretty(&sim).unwrap());
+                        *sim_state.lock().unwrap() = Some(sim.clone());
+                        diff_view.buffer().set_text(&serde_json::to_string_pretty(&sim).unwrap());
                         heatmap_area.queue_draw();
-                    });
-                } else {
-                    // parse failed, write raw stdout to diff_view
-                    let ctx = MainContext::default();
-                    ctx.spawn_local(async move {
-                        diff_view_clone.buffer().set_text(&stdout);
-                    });
+                    }
+                    Ok(Err(stdout)) | Err(stdout) => {
+                        // parse failed, write raw stdout to diff_view
+                        diff_view.buffer().set_text(&stdout);
+                    }
                 }
             });
         });
 
         win.set_child(Some(&hpaned));
-        win.show();
+        win.present();
     });
 
     app.run();
