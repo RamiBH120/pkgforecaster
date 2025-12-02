@@ -48,14 +48,14 @@ pub struct Summary {
 //     let total = updates.len() as u32;
 //     let summary = Summary {
 //         total,
-//         highRisk: 0,
-//         mediumRisk: total,
+//         high_risk: 0,
+//         medium_risk: total,
 //     };
 //     Simulation { updates, summary }
 // }
 
 impl Simulation {
     pub fn new() -> Self {
-        Self { updates: vec![], summary: Summary { total: 0, highRisk: 0, mediumRisk: 0 } }
+        Self { updates: vec![], summary: Summary { total: 0, high_risk: 0, medium_risk: 0 } }
     }
 }
