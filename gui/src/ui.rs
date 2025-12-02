@@ -9,7 +9,6 @@ use std::io::Read;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::process::Command;
-use glib::MainContext;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct PackageUpdate {
@@ -218,16 +217,16 @@ pub fn run() -> anyhow::Result<()> {
         }
 
         // wire scan button to run engine asynchronously and update UI
-        let diff_view_clone = diff_view.clone();
-        let heatmap_area_clone = heatmap_area.clone();
-        let sim_state_for_thread = sim_state.clone();
+        let diff_view_weak = diff_view.downgrade();
+        let heatmap_area_weak = heatmap_area.downgrade();
+        let sim_state_for_button = sim_state.clone();
         
         scan_button.connect_clicked(move |_| {
-            let diff_view = diff_view_clone.clone();
-            let heatmap_area = heatmap_area_clone.clone();
-            let sim_state = sim_state_for_thread.clone();
+            let diff_view_weak = diff_view_weak.clone();
+            let heatmap_area_weak = heatmap_area_weak.clone();
+            let sim_state = sim_state_for_button.clone();
             
-            // Spawn blocking work in a separate thread, then update UI on main thread
+            // Spawn blocking work in a separate thread
             std::thread::spawn(move || {
                 // Try to call engine CLI; if fails, fallback to bundled dummy file
                 let output = Command::new("../engine/target/release/engine-cli")
@@ -247,6 +246,16 @@ pub fn run() -> anyhow::Result<()> {
                 
                 // Schedule UI update on main thread using glib::idle_add_local
                 glib::idle_add_local(move || {
+                    // Upgrade weak references to check if widgets still exist
+                    let diff_view = match diff_view_weak.upgrade() {
+                        Some(w) => w,
+                        None => return glib::ControlFlow::Break,
+                    };
+                    let heatmap_area = match heatmap_area_weak.upgrade() {
+                        Some(w) => w,
+                        None => return glib::ControlFlow::Break,
+                    };
+                    
                     match parsed {
                         Ok(mut sim) => {
                             // ensure risk scores exist
